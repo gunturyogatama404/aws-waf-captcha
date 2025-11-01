@@ -4,7 +4,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import tensorflow as tf
 import keras
-import keras.api.layers as layers
+from tensorflow import keras
+from keras import layers, models
 import matplotlib.pyplot as plt
 
 train_ds = keras.utils.image_dataset_from_directory(
