@@ -1,58 +1,38 @@
-import uvicorn
-import threading
-import ctypes
-
+import asyncio, logging, httpx
+from fastapi import FastAPI
 from lib._models import TokenTask, CaptchaTask
-from lib._ai import get_solutions
 from lib._aws import AwsTokenProcessor, InvalidCaptchaError, InvalidProxyError
 
-from fastapi import FastAPI
+logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s", level=logging.INFO)
+app = FastAPI(title="AWS Token Solver API v2")
 
-lock = threading.Lock()
+INFERENCE_URL = "http://127.0.0.1:6000/predict"
 
-token_solves = 0
-captcha_solves = 0
-
-app = FastAPI()
-
-@app.post('/solveCaptcha')
-def solve_captcha(task: CaptchaTask):
-    global captcha_solves
-
-    images = task.images
-    target = task.target
-
+@app.post("/solveCaptcha")
+async def solve_captcha(task: CaptchaTask):
     try:
-        solutions = get_solutions(images, target)
-    except Exception as ex:
-        return {"error":str(ex)}
-    
-    with lock:
-        captcha_solves += 1
-        ctypes.windll.kernel32.SetConsoleTitleW(f"Token solves: {token_solves} | Captcha solves: {captcha_solves}")
-    
-    return {"solutions":solutions}
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(INFERENCE_URL, json=task.dict())
+        return resp.json()
+    except Exception as e:
+        logging.error(e)
+        return {"error": str(e)}
 
-@app.post('/getToken')
-def getToken(task: TokenTask):
-    global token_solves
-
+@app.post("/getToken")
+async def get_token(task: TokenTask):
     try:
         aws = AwsTokenProcessor(task)
         token = aws.get_token()
+        return {"token": token, "status": "success"}
     except InvalidCaptchaError:
-        return {"status":"failed to solve captcha"}
+        return {"status": "failed to solve captcha"}
     except InvalidProxyError:
-        return {"status":"invalid proxy"}
+        return {"status": "invalid proxy"}
     except Exception as ex:
-        return {"exception":str(ex)}
+        logging.error(ex)
+        return {"exception": str(ex)}
 
-    with lock:
-        token_solves += 1
-        ctypes.windll.kernel32.SetConsoleTitleW(f"Token solves: {token_solves} | Captcha solves: {captcha_solves}")
-
-    return {"token":token, "status":"success"}
-
-if __name__ == '__main__':
-    ctypes.windll.kernel32.SetConsoleTitleW(f"Token solves: {token_solves} | Captcha solves: {captcha_solves}")
-    uvicorn.run(app, host="0.0.0.0", port=5000, workers=1, reload=False)
+if __name__ == "__main__":
+    import uvicorn
+    logging.info("🚀 Starting main API...")
+    uvicorn.run(app, host="0.0.0.0", port=5000)
